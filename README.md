@@ -80,12 +80,22 @@ python test_scraper.py
 ### Continuous Monitoring
 Run the scraper continuously (scans every minute):
 
-**Option 1: Using batch file (recommended for Windows - handles Unicode properly):**
+**Option 1: Default streamer (Slimaera):**
 ```bash
 run_scraper.bat
 ```
 
-**Option 2: Using Python directly:**
+**Option 2: Any streamer (interactive):**
+```bash
+run_any_streamer.bat
+```
+
+**Option 3: Command line (specify streamer):**
+```bash
+python moobot_scraper.py --streamer xqc
+```
+
+**Option 4: Python directly (uses default):**
 ```bash
 python moobot_scraper.py
 ```
@@ -195,15 +205,20 @@ Feel free to improve the scraper! Common areas for enhancement:
 - Mobile-responsive HTML improvements
 - Search and filter functionality
 
-## 🌟 Screenshots
+## 🌟 Output Examples
 
 ### Main Index Page
-![Index Page](docs/index-page.png)
-*Beautiful overview of all collected songs organized by date*
+- 📊 **Clean overview** of all collected songs organized by date
+- 📈 **Statistics** showing total days tracked and songs collected
+- 🔗 **Quick navigation** to daily song pages
+- 🎨 **Modern design** with Twitch-style purple theme
 
-### Daily Song Page
-![Daily Page](docs/daily-page.png)
-*Detailed view with YouTube links, timestamps, and metadata*
+### Daily Song Pages
+- 🎵 **Song titles** with rich metadata (duration, requester, status)
+- ▶️ **Direct YouTube links** - "Watch on YouTube" buttons
+- 🔍 **Search fallbacks** - "Search YouTube" for songs without direct links
+- 📅 **Timestamps** showing when each song was collected
+- 📱 **Responsive design** that works on mobile and desktop
 
 ## 🆘 License
 
