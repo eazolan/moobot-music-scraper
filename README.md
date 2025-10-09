@@ -109,10 +109,13 @@ The scraper will:
 ### Stopping the Scraper
 The scraper includes a **graceful shutdown system**:
 
-- **Press `Ctrl+C`** - Stops immediately and safely saves all data
-- **Press `Ctrl+Break`** (Windows) - Alternative shutdown method
+- **Press `Ctrl+C`** - Stops immediately and safely saves all data ⭐ **Recommended**
+- **Press `Ctrl+Pause/Break`** (Windows) - Alternative method (Pause/Break key is near Print Screen)
+- **Close terminal window** - Also triggers graceful shutdown
 - **Automatic cleanup** - Ensures WebDriver is closed and data is preserved
 - **No data loss** - All collected songs are saved before shutdown
+
+**💡 Tip:** Just use `Ctrl+C` - it's the easiest and works on all systems!
 
 You'll see a message like: `"Received SIGINT (Ctrl+C). Initiating graceful shutdown..."`
 
