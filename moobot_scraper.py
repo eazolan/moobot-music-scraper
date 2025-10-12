@@ -28,7 +28,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # Configuration
 # Default streamer (can be overridden by command line argument)
-DEFAULT_STREAMER = "slimaera"
+DEFAULT_STREAMER = "pokimane"
 
 # Get streamer name from command line args or use default
 def get_streamer_name():
@@ -196,6 +196,48 @@ class MoobotScraper:
         except Exception as e:
             self.logger.error(f"Failed to save data: {e}")
             
+    def verify_streamer_exists(self) -> bool:
+        """Check if the streamer exists on Moobot by looking for 'not found' messages."""
+        try:
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text.strip()
+            self.safe_log('debug', f"Page content for verification: {page_text[:200]}...")
+            
+            # Check for common "not found" patterns
+            not_found_patterns = [
+                f"{STREAMER_NAME} was not found",
+                "was not found",
+                "not found",
+                "404",
+                "User not found",
+                "Streamer not found",
+                "This page requires Javascript"
+            ]
+            
+            page_text_lower = page_text.lower()
+            
+            for pattern in not_found_patterns:
+                if pattern.lower() in page_text_lower:
+                    self.safe_log('debug', f"Found not-found pattern: {pattern}")
+                    # Special case: "This page requires Javascript" is normal, but if that's ALL we see, it's suspicious
+                    if pattern == "This page requires Javascript" and len(page_text.strip()) < 50:
+                        return False
+                    elif pattern != "This page requires Javascript":
+                        return False
+            
+            # Additional check: if the page is suspiciously empty or only has basic content
+            if len(page_text.strip()) < 20:
+                self.safe_log('debug', "Page seems too short/empty")
+                return False
+                
+            # If we get here, the streamer likely exists
+            self.safe_log('info', f"Streamer '{STREAMER_NAME}' appears to exist on Moobot")
+            return True
+            
+        except Exception as e:
+            self.safe_log('warning', f"Error verifying streamer existence: {e}")
+            # If we can't verify, assume it exists and let the scraper continue
+            return True
+    
     def scrape_songs(self) -> List[Dict]:
         """Scrape current songs from the Moobot page."""
         if not self.driver:
@@ -207,6 +249,16 @@ class MoobotScraper:
             
             # Wait for the page to load
             time.sleep(5)
+            
+            # Check if the streamer exists on Moobot
+            if not self.verify_streamer_exists():
+                error_msg = f"Streamer '{STREAMER_NAME}' was not found on Moobot. Please check the spelling and try again."
+                self.safe_log('error', error_msg)
+                print(f"\n❌ ERROR: {error_msg}")
+                print(f"   URL attempted: {MOOBOT_URL}")
+                print(f"   Make sure the streamer has a Moobot music queue configured.")
+                print(f"   Try checking the URL manually in your browser.\n")
+                return []
             
             # Take a screenshot for debugging
             self.driver.save_screenshot(OUTPUT_DIR / "page_screenshot.png")

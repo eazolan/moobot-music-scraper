@@ -8,7 +8,7 @@ A Python script that monitors Moobot music queue pages for **any Twitch streamer
 
 ## 🎯 **Configure for Any Streamer**
 
-By default, this monitors **Slimaera's** queue, but you can easily change it:
+By default, this monitors **Pokimane's** queue, but you can easily change it:
 
 ### Method 1: Command Line (Recommended)
 ```bash
@@ -80,7 +80,7 @@ python test_scraper.py
 ### Continuous Monitoring
 Run the scraper continuously (scans every minute):
 
-**Option 1: Default streamer (Slimaera):**
+**Option 1: Default streamer (Pokimane):**
 ```bash
 run_scraper.bat
 ```
@@ -149,6 +149,15 @@ If you get ChromeDriver errors:
 - The webdriver-manager should automatically download the correct ChromeDriver
 - Try updating Chrome to the latest version
 
+### Invalid Streamer Name
+If you get an error like "Streamer 'xyz' was not found on Moobot":
+1. **Double-check the spelling** - Streamer names are case-sensitive
+2. **Verify the streamer exists on Twitch** - Make sure it's a real Twitch channel
+3. **Check if they use Moobot** - Not all streamers use Moobot for music queues
+4. **Try the URL manually** - Visit `https://moo.bot/r/music#streamername` in your browser
+5. **Test with a known streamer** - Try `pokimane`, `xqc`, or `shroud` to verify the scraper works
+6. **Run the invalid streamer test** - Use `test_invalid.bat` to verify error detection works
+
 ### No Songs Found
 If the scraper runs but finds no songs:
 1. Check the debug files:
@@ -156,6 +165,7 @@ If the scraper runs but finds no songs:
    - `output/page_source.html` - Raw HTML of the page
 2. The page structure might have changed - check the logs for details
 3. Make sure the stream is actually active with songs in the queue
+4. Verify the streamer has a music queue feature enabled on Moobot
 
 ### Unicode/Encoding Issues
 If you see `UnicodeEncodeError` when logging songs with special characters (Korean, Japanese, etc.):
@@ -177,7 +187,7 @@ If you get permission errors:
 You can modify these settings in `moobot_scraper.py`:
 
 - `SCAN_INTERVAL` - How often to scan (default: 60 seconds)
-- `MOOBOT_URL` - The URL to scrape (currently set to slimaera's queue)
+- `MOOBOT_URL` - The URL to scrape (currently set to pokimane's queue)
 - Chrome options in `setup_webdriver()` method
 
 ## File Structure
@@ -185,10 +195,16 @@ You can modify these settings in `moobot_scraper.py`:
 ```
 moobot_collect/
 │
-├── moobot_scraper.py      # Main scraper script
-├── test_scraper.py        # Test script for single runs
-├── requirements.txt       # Python dependencies
-├── README.md             # This file
+├── moobot_scraper.py         # Main scraper script
+├── test_scraper.py           # Test script for single runs  
+├── test_invalid_streamer.py  # Test for invalid streamer detection
+├── requirements.txt          # Python dependencies
+├── install.bat              # Install dependencies (Windows)
+├── run_scraper.bat          # Run with default streamer (Windows)
+├── run_any_streamer.bat     # Run with custom streamer (Windows)
+├── run_test.bat             # Single test run (Windows)
+├── test_invalid.bat         # Test invalid streamer detection (Windows)
+├── README.md                # This file
 │
 └── output/               # Created when first run
     ├── songs_data.json   # Persistent song data
