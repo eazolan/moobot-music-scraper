@@ -11,7 +11,7 @@ set PYTHONLEGACYWINDOWSSTDIO=utf-8
 
 echo Console encoding set to UTF-8
 echo Starting scraper for Pokimane (default)...
-echo Monitoring: https://moo.bot/r/music#pokimane
+echo Monitoring: https://moo.bot/r/music#Pokimane
 echo.
 echo To monitor a different streamer, use: run_any_streamer.bat
 echo Press Ctrl+C to stop gracefully.

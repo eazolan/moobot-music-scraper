@@ -46,11 +46,22 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Moobot Scraper specific
-output/
-debug_youtube_links.py
-test_audio_muting.py
-test_graceful_shutdown.py
+# Moobot Scraper specific - Output directory contents (but keep structure)
+# Ignore all files in output/ but preserve the directory structure using .gitkeep files
+output/*
+!output/
+!output/.gitkeep
+output/html/*
+!output/html/
+!output/html/.gitkeep
+
+# Test output directory contents
+test_output/*
+!test_output/
+!test_output/.gitkeep
+test_output/html/*
+!test_output/html/
+!test_output/html/.gitkeep
 
 # Logs
 *.log

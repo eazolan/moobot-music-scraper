@@ -57,9 +57,9 @@ DEFAULT_STREAMER = "your_streamer_name_here"
    pip install -r requirements.txt
    ```
 
-3. **Test the setup:**
+2. **Test the setup:**
    ```bash
-   python test_scraper.py
+   python tests/test_scraper.py
    ```
 
 ## Usage
@@ -74,7 +74,7 @@ run_test.bat
 
 **Option 2: Using Python directly:**
 ```bash
-python test_scraper.py
+python tests/test_scraper.py
 ```
 
 ### Continuous Monitoring
@@ -196,8 +196,6 @@ You can modify these settings in `moobot_scraper.py`:
 moobot_collect/
 │
 ├── moobot_scraper.py         # Main scraper script
-├── test_scraper.py           # Test script for single runs  
-├── test_invalid_streamer.py  # Test for invalid streamer detection
 ├── requirements.txt          # Python dependencies
 ├── install.bat              # Install dependencies (Windows)
 ├── run_scraper.bat          # Run with default streamer (Windows)
@@ -206,14 +204,33 @@ moobot_collect/
 ├── test_invalid.bat         # Test invalid streamer detection (Windows)
 ├── README.md                # This file
 │
-└── output/               # Created when first run
-    ├── songs_data.json   # Persistent song data
-    ├── scraper.log       # Log file
+├── domains/                 # Domain-driven design architecture
+│   ├── music_queue/         # Core business domain
+│   ├── content_publishing/  # HTML generation domain
+│   └── song_extraction/     # Song extraction strategies
+│
+├── infrastructure/          # Infrastructure layer
+│   ├── filesystem.py       # File operations
+│   └── logging.py          # Logging utilities
+│
+├── tests/                   # Test and debugging scripts
+│   ├── test_scraper.py     # Main scraper tests
+│   ├── test_music_queue_domain.py
+│   ├── test_content_publishing_domain.py
+│   └── debug_youtube_links.py
+│
+├── docs/                    # Documentation
+│   ├── DDD_REFACTORING_PLAN.md
+│   └── WARP.md
+│
+└── output/                  # Created when first run
+    ├── songs_data.json      # Persistent song data
+    ├── scraper.log          # Log file
     ├── page_screenshot.png
     ├── page_source.html
-    └── html/            # Generated HTML pages
-        ├── index.html   # Main page
-        └── songs_*.html # Daily pages
+    └── html/                # Generated HTML pages
+        ├── index.html       # Main page
+        └── songs_*.html     # Daily pages
 ```
 
 ## Contributing

@@ -13,6 +13,6 @@ echo Console encoding set to UTF-8
 echo Running test...
 echo.
 
-python test_scraper.py
+python tests/test_scraper.py
 
 pause

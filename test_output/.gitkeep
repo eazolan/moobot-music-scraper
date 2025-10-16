@@ -1,0 +1,2 @@
+# This file ensures the test_output directory structure is preserved in git
+# while ignoring the actual test files and outputs

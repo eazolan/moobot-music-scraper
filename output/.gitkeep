@@ -1,0 +1,2 @@
+# This file ensures the output directory structure is preserved in git
+# while ignoring the actual content files (songs_data.json, logs, etc.)
