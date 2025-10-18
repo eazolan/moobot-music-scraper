@@ -112,11 +112,26 @@ class SongMatchingService:
             "next", "previous", "back", "forward", "submit", "cancel",
             "song requests", "moobot", "refresh", "queue", "loading", "error",
             "song queue", "song history", "requested by", "played", "ago",
-            "by ", "duration:", "status:"
+            "by ", "duration:", "status:", "page ", "page"
         ]
         
         # Check for UI patterns
         if any(indicator in text_lower for indicator in ui_indicators):
+            return True
+        
+        # Check for pagination patterns (page 1, page 2, etc.)
+        if re.match(r'^page\s*\d+$', text_lower):
+            return True
+        
+        # Check for navigation patterns ("1", "2", "3" when they're just numbers)
+        if re.match(r'^\d+$', text_lower) and len(text_lower) <= 3:
+            return True
+        
+        # Check for search-related UI text
+        search_ui_patterns = [
+            'search youtube', 'youtube search', 'search', 'youtube'
+        ]
+        if text_lower in search_ui_patterns:
             return True
         
         # Check for time patterns (like "04:17", "03:41")

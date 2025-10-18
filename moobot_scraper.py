@@ -25,7 +25,7 @@ from infrastructure.filesystem import setup_directories
 # Import domain modules
 from domains.music_queue import SongRequest, StreamerId, SongMatchingService, QueueRepository
 from domains.content_publishing import SongCollection, PublishingConfig, ContentPublisher
-from domains.song_extraction import ExtractionCoordinator, ExtractionConfig, ElementSelector
+from domains.song_extraction import ExtractionCoordinator, ExtractionConfig, ElementSelector, ExtractionResult
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -232,6 +232,98 @@ class MoobotScraper:
             self.logger.warning(f"Error verifying streamer existence: {e}")
             return True
     
+    def _scrape_additional_history_pages(self, existing_songs_with_urls: Dict[str, str]) -> List[SongRequest]:
+        """Scrape additional pages from the song history section."""
+        additional_songs = []
+        
+        try:
+            # Look for pagination in history section
+            history_pagination = self.driver.find_elements(
+                By.CSS_SELECTOR, 
+                "#input-content-history .moobot-nav-pagination li.inactive"
+            )
+            
+            if not history_pagination:
+                self.logger.info("No additional history pages found")
+                return additional_songs
+            
+            self.logger.info(f"Found {len(history_pagination)} additional history pages to scrape")
+            
+            # Get page numbers to scrape (avoid stale element issues)
+            page_numbers = []
+            for page_element in history_pagination[:4]:  # Limit to first 4 additional pages
+                try:
+                    page_number = page_element.get_attribute("data-index")
+                    if page_number and page_number.isdigit():
+                        page_numbers.append(int(page_number))
+                except:
+                    continue
+            
+            # Click each page by re-finding the elements
+            for page_num in page_numbers:
+                try:
+                    self.logger.info(f"Scraping history page {page_num}...")
+                    
+                    # Re-find the pagination element to avoid stale reference
+                    page_elements = self.driver.find_elements(
+                        By.CSS_SELECTOR, 
+                        f"#input-content-history .moobot-nav-pagination li[data-index='{page_num}'].inactive"
+                    )
+                    
+                    if not page_elements:
+                        self.logger.warning(f"Could not find pagination element for page {page_num}")
+                        continue
+                    
+                    # Click the page button
+                    self.driver.execute_script("arguments[0].click();", page_elements[0])
+                    
+                    # Wait for content to load
+                    import time
+                    time.sleep(2)
+                    
+                    # Extract songs from this page using history-specific selector
+                    history_selectors = [
+                        ElementSelector.create_custom(
+                            "#input-content-history tbody tr",
+                            description="History table rows",
+                            priority=10
+                        )
+                    ]
+                    
+                    page_result = self.extraction_coordinator.extract_songs_optimized(
+                        self.driver, history_selectors, self.extraction_config, existing_songs_with_urls
+                    )
+                    
+                    if page_result.success:
+                        additional_songs.extend(page_result.songs)
+                        self.logger.info(f"Found {len(page_result.songs)} songs on history page {page_num}")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error scraping history page {page_num}: {e}")
+                    continue
+                    
+            self.logger.info(f"Total additional songs from history pages: {len(additional_songs)}")
+            
+        except Exception as e:
+            self.logger.warning(f"Error in pagination handling: {e}")
+        
+        return additional_songs
+    
+    def _remove_duplicate_songs(self, songs: List[SongRequest]) -> List[SongRequest]:
+        """Remove duplicate songs from a list based on title matching."""
+        unique_songs = []
+        seen_titles = set()
+        
+        for song in songs:
+            title_lower = song.title.lower()
+            if title_lower not in seen_titles:
+                unique_songs.append(song)
+                seen_titles.add(title_lower)
+            else:
+                self.logger.debug(f"Removed duplicate song: {song.title}")
+        
+        return unique_songs
+    
     def _create_extraction_selectors(self) -> List[ElementSelector]:
         """Create Moobot-specific selectors with priorities."""
         return [
@@ -317,9 +409,33 @@ class MoobotScraper:
             # Use the extraction domain for comprehensive song extraction
             selectors = self._create_extraction_selectors()
             
-            # Extract songs using the optimized approach
+            # Extract songs using the optimized approach with pagination
+            all_songs = []
+            
+            # First, get songs from current page
             extraction_result = self.extraction_coordinator.extract_songs_optimized(
                 self.driver, selectors, self.extraction_config, existing_songs_with_urls
+            )
+            
+            if extraction_result.success:
+                all_songs.extend(extraction_result.songs)
+                
+            # Try to navigate through additional pages in history section
+            try:
+                additional_songs = self._scrape_additional_history_pages(existing_songs_with_urls)
+                all_songs.extend(additional_songs)
+            except Exception as e:
+                self.logger.warning(f"Failed to scrape additional pages: {e}")
+            
+            # Remove duplicates from combined results
+            unique_songs = self._remove_duplicate_songs(all_songs)
+            
+            # Create combined result
+            extraction_result = ExtractionResult.create_success(
+                songs=unique_songs,
+                strategy_used="coordinator_with_pagination",
+                selector_used="multiple_with_pagination",
+                element_count=len(all_songs)
             )
             
             if extraction_result.success:
