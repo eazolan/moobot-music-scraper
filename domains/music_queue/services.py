@@ -104,23 +104,58 @@ class SongMatchingService:
             
         text_lower = text.lower().strip()
         
-        # Common UI text patterns
-        ui_indicators = [
+        # Multi-word UI patterns (check with substring match)
+        multi_word_ui_indicators = [
+            "song requests", "moobot", "song queue", "song history", 
+            "requested by", "played", "ago",
+            "by ", "duration:", "status:", "page ",
+            # Moobot UI/status texts
+            "playing now", "in minutes", "use the !sr", "use the !sr chat command",
+            "how to use the chat command", "request a song", "request songs"
+        ]
+        
+        # Check for multi-word patterns (substring match is OK)
+        if any(indicator in text_lower for indicator in multi_word_ui_indicators):
+            return True
+        
+        # Single-word UI indicators (must be whole words to avoid false positives)
+        # Words like "home" should only match when standalone, not in "Take Me Home"
+        single_word_ui_indicators = [
             "click", "button", "menu", "login", "sign", "register",
             "home", "about", "contact", "help", "settings", "profile",
             "search", "filter", "sort", "view", "show", "hide",
             "next", "previous", "back", "forward", "submit", "cancel",
-            "song requests", "moobot", "refresh", "queue", "loading", "error",
-            "song queue", "song history", "requested by", "played", "ago",
-            "by ", "duration:", "status:", "page ", "page"
+            "refresh", "queue", "loading", "error", "page", "playing"
         ]
         
-        # Check for UI patterns
-        if any(indicator in text_lower for indicator in ui_indicators):
-            return True
+        # Check single-word patterns with word boundaries
+        for indicator in single_word_ui_indicators:
+            # Use word boundary regex to match whole words only
+            pattern = r'\b' + re.escape(indicator) + r'\b'
+            if re.search(pattern, text_lower):
+                # Additional check: if it's part of a longer title (has other words), might be OK
+                # Extract just alphanumeric words for position check
+                words = re.findall(r'\b\w+\b', text_lower)
+                # If text has more than 4 words and the indicator is in the middle, likely a song title
+                # For example: "Take Me Home, Country Roads" has "home" in the middle
+                if len(words) > 4:
+                    try:
+                        indicator_pos = words.index(indicator)
+                        # If the word is not first or last, and there are words on both sides, it's likely a song
+                        if indicator_pos > 0 and indicator_pos < len(words) - 1:
+                            continue  # Don't flag as UI text
+                    except ValueError:
+                        pass  # Indicator not in words list, regex matched but position check failed
+                return True
         
         # Check for pagination patterns (page 1, page 2, etc.)
         if re.match(r'^page\s*\d+$', text_lower):
+            return True
+        
+        # Moobot status messages like "Playing", "Playing now", "Playing in 9 minutes"
+        if re.match(r'^playing(\s+now)?$', text_lower):
+            return True
+        if re.match(r'^playing\s+in\s+\d+\s+minutes?$', text_lower):
             return True
         
         # Check for navigation patterns ("1", "2", "3" when they're just numbers)
@@ -132,6 +167,12 @@ class SongMatchingService:
             'search youtube', 'youtube search', 'search', 'youtube'
         ]
         if text_lower in search_ui_patterns:
+            return True
+        
+        # Explicit help/instruction texts we saw on the page
+        if text_lower.startswith('use the !sr'):
+            return True
+        if text_lower.startswith('how to use the chat command'):
             return True
         
         # Check for time patterns (like "04:17", "03:41")
@@ -224,18 +265,52 @@ class QueueRepository:
         existing_songs = self.load_daily_queue(queue_date)
         existing_titles = {song.title.lower() for song in existing_songs}
         
-        # Filter out duplicates
-        songs_to_add = []
-        for song in new_songs:
-            if song.title.lower() not in existing_titles:
-                songs_to_add.append(song)
-                existing_titles.add(song.title.lower())
+        # Helper: decide if URL is a direct YouTube link (not a search page)
+        def _is_direct_youtube(u: str) -> bool:
+            if not u:
+                return False
+            u = u.lower()
+            if "youtube.com/results" in u:
+                return False
+            return (
+                "youtube.com/watch" in u
+                or "youtu.be/" in u
+                or "youtube.com/shorts" in u
+                or "music.youtube.com/watch" in u
+            )
         
-        if songs_to_add:
+        # Filter out duplicates and collect upgrades for existing entries
+        songs_to_add = []
+        upgrades = []  # (index, new_url)
+        title_to_index = {song.title.lower(): i for i, song in enumerate(existing_songs)}
+        
+        for song in new_songs:
+            key = song.title.lower()
+            if key not in existing_titles:
+                songs_to_add.append(song)
+                existing_titles.add(key)
+            else:
+                # Potential upgrade: if existing URL is missing or a search page, and new has a direct URL
+                idx = title_to_index.get(key)
+                if idx is not None:
+                    existing = existing_songs[idx]
+                    if (_is_direct_youtube(song.youtube_url) and not _is_direct_youtube(existing.youtube_url)):
+                        existing_songs[idx] = SongRequest(
+                            title=existing.title,
+                            youtube_url=song.youtube_url or existing.youtube_url,
+                            duration=existing.duration,
+                            requester=existing.requester,
+                            status=existing.status,
+                            timestamp=existing.timestamp,
+                            scraped_at=existing.scraped_at
+                        )
+                        upgrades.append((idx, song.youtube_url))
+        
+        if songs_to_add or upgrades:
             # Add to existing songs and save
             all_songs = existing_songs + songs_to_add
             self.save_daily_queue(queue_date, all_songs)
-            self.logger.info(f"Added {len(songs_to_add)} new songs for {queue_date}")
+            self.logger.info(f"Added {len(songs_to_add)} new songs and upgraded {len(upgrades)} URLs for {queue_date}")
         
         return len(songs_to_add)
     

@@ -72,6 +72,7 @@ class MoobotScraper:
         # But still extract YouTube URLs
         self.extraction_config.extract_youtube_urls = True
         self.extraction_config.try_button_click = True  # This was working well
+        self.extraction_config.use_robust_finding = True  # Prefer robust path for better URL capture
         self.extraction_config.max_songs_per_strategy = 10  # Limit songs per strategy
         # Enable strong filtering
         self.extraction_config.skip_ui_text = True
@@ -237,48 +238,90 @@ class MoobotScraper:
         additional_songs = []
         
         try:
-            # Look for pagination in history section
+            # First, check if there's pagination at all
+            pagination_container = self.driver.find_elements(
+                By.CSS_SELECTOR,
+                "#input-content-history .moobot-nav-pagination"
+            )
+            
+            if not pagination_container:
+                self.logger.info("No pagination found in history section")
+                return additional_songs
+            
+            # Navigate to page 1 first to ensure we can see all pages
+            # Look for the "go to first page" button (double-left arrow)
+            first_page_buttons = self.driver.find_elements(
+                By.CSS_SELECTOR,
+                "#input-content-history .moobot-nav-pagination li[data-index='1']"
+            )
+            
+            if first_page_buttons:
+                try:
+                    self.logger.info("Navigating to history page 1...")
+                    self.driver.execute_script("arguments[0].click();", first_page_buttons[0])
+                    time.sleep(2)  # Wait for page to load
+                except Exception as e:
+                    self.logger.warning(f"Could not navigate to page 1: {e}")
+            
+            # Now get all available pages from the pagination
             history_pagination = self.driver.find_elements(
                 By.CSS_SELECTOR, 
-                "#input-content-history .moobot-nav-pagination li.inactive"
+                "#input-content-history .moobot-nav-pagination li[data-index]"
             )
             
             if not history_pagination:
-                self.logger.info("No additional history pages found")
+                self.logger.info("No pagination elements found")
                 return additional_songs
             
-            self.logger.info(f"Found {len(history_pagination)} additional history pages to scrape")
-            
-            # Get page numbers to scrape (avoid stale element issues)
+            # Collect all page numbers (excluding the current active page and navigation buttons)
             page_numbers = []
-            for page_element in history_pagination[:4]:  # Limit to first 4 additional pages
+            for page_element in history_pagination:
                 try:
                     page_number = page_element.get_attribute("data-index")
                     if page_number and page_number.isdigit():
-                        page_numbers.append(int(page_number))
+                        page_num = int(page_number)
+                        # Skip page 1 since we're already on it, scrape up to 15 pages for comprehensive coverage
+                        if page_num > 1 and page_num <= 15:
+                            if page_num not in page_numbers:  # Avoid duplicates
+                                page_numbers.append(page_num)
                 except:
                     continue
             
-            # Click each page by re-finding the elements
+            page_numbers = sorted(page_numbers)  # Sort to go in order
+            self.logger.info(f"Found {len(page_numbers)} additional history pages to scrape: {page_numbers}")
+            
+            # Click each page in order
             for page_num in page_numbers:
                 try:
                     self.logger.info(f"Scraping history page {page_num}...")
                     
                     # Re-find the pagination element to avoid stale reference
+                    # Look for both active and inactive versions
                     page_elements = self.driver.find_elements(
                         By.CSS_SELECTOR, 
-                        f"#input-content-history .moobot-nav-pagination li[data-index='{page_num}'].inactive"
+                        f"#input-content-history .moobot-nav-pagination li[data-index='{page_num}']"
                     )
                     
                     if not page_elements:
                         self.logger.warning(f"Could not find pagination element for page {page_num}")
                         continue
                     
+                    # Find the correct element (not the navigation arrows)
+                    clickable_element = None
+                    for elem in page_elements:
+                        # Skip if it's a navigation arrow (usually has a specific width style)
+                        style = elem.get_attribute("style") or ""
+                        if "61px" not in style and "132px" not in style:  # Not a navigation arrow
+                            clickable_element = elem
+                            break
+                    
+                    if not clickable_element:
+                        clickable_element = page_elements[0]  # Fallback to first element
+                    
                     # Click the page button
-                    self.driver.execute_script("arguments[0].click();", page_elements[0])
+                    self.driver.execute_script("arguments[0].click();", clickable_element)
                     
                     # Wait for content to load
-                    import time
                     time.sleep(2)
                     
                     # Extract songs from this page using history-specific selector
@@ -327,38 +370,25 @@ class MoobotScraper:
     def _create_extraction_selectors(self) -> List[ElementSelector]:
         """Create Moobot-specific selectors with priorities."""
         return [
-            # High priority: Moobot-specific song queue table
+            # Strict: only Moobot queue and history table rows + explicit YouTube links
             ElementSelector.create_custom(
-                "#input-content-queue tbody tr", 
-                description="Moobot song queue table rows", 
+                "#input-content-queue tbody tr",
+                description="Moobot song queue table rows",
                 priority=10
             ),
             ElementSelector.create_custom(
-                "table.table-striped tbody tr", 
-                description="Striped table rows", 
-                priority=9
+                "#input-content-history tbody tr",
+                description="Moobot song history table rows",
+                priority=10
             ),
             ElementSelector.create_custom(
-                "tbody tr[data-id]", 
-                description="Table rows with data-id", 
+                "tbody tr[data-id]",
+                description="Table rows with data-id",
                 priority=8
             ),
-            # Medium priority: General table rows and YouTube links
             ElementSelector.create_table_row(priority=7),
-            ElementSelector.create_youtube_links(priority=6),
-            # Low priority: Fallback selectors
-            ElementSelector.create_custom(
-                ".queue-item, .song-item, .music-item", 
-                description="Music item classes", 
-                priority=4
-            ),
-            ElementSelector.create_custom(
-                "[class*='song'], [class*='music']", 
-                description="Elements with song/music in class", 
-                priority=3
-            ),
-            ElementSelector.create_generic_links(priority=2),
-            ElementSelector.create_text_elements(priority=1)
+            ElementSelector.create_youtube_links(priority=6)
+            # Note: intentionally removed generic fallback selectors to prevent UI text capture
         ]
     
     def scrape_songs(self) -> List[Dict]:
@@ -398,10 +428,23 @@ class MoobotScraper:
             # Load existing songs for today to avoid redundant YouTube extraction
             from datetime import date
             existing_songs_today = self.queue_repository.load_daily_queue(date.today())
+            def _is_direct_youtube(u: str) -> bool:
+                try:
+                    u = (u or "").lower()
+                    if "youtube.com/results" in u:
+                        return False
+                    return (
+                        "youtube.com/watch" in u
+                        or "youtu.be/" in u
+                        or "youtube.com/shorts" in u
+                        or "music.youtube.com/watch" in u
+                    )
+                except:
+                    return False
             existing_songs_with_urls = {
-                song.title.lower(): song.youtube_url 
-                for song in existing_songs_today 
-                if song.youtube_url
+                song.title.lower(): song.youtube_url
+                for song in existing_songs_today
+                if song.youtube_url and _is_direct_youtube(song.youtube_url)
             }
             
             self.logger.info(f"Found {len(existing_songs_with_urls)} existing songs with YouTube URLs")
@@ -498,6 +541,9 @@ class MoobotScraper:
                 for song_dict in songs_dicts:
                     try:
                         song = SongRequest.from_dict(song_dict)
+                        # Skip entries that look like UI/status/help text (cleanup of legacy data)
+                        if self.song_matcher.is_ui_text(song.title):
+                            continue
                         songs.append(song)
                     except ValueError as e:
                         self.logger.warning(f"Skipping invalid song in {date_str}: {e}")
