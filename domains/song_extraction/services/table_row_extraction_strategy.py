@@ -341,6 +341,17 @@ class TableRowExtractionStrategy(ExtractionStrategy):
     ) -> str:
         """Simple YouTube URL extraction from table row."""
         try:
+            # 1) Any direct anchor links inside the row
+            anchors = row_element.find_elements(By.CSS_SELECTOR, "a[href*='youtube.com'], a[href*='youtu.be']")
+            for a in anchors:
+                href = a.get_attribute("href")
+                if href:
+                    return href
+        except:
+            pass
+        
+        try:
+            # 2) The Moobot external-link button may carry data-url
             if config.try_direct_links:
                 link_button = row_element.find_element(
                     By.CSS_SELECTOR, "button.button-type-link"
@@ -352,8 +363,8 @@ class TableRowExtractionStrategy(ExtractionStrategy):
         except:
             pass
         
-        # Fallback to search if configured
-        if config.fallback_to_search:
+        # Fallback to search if configured and title looks like a real song
+        if config.fallback_to_search and not self.song_matcher.is_ui_text(song_title):
             return self._search_youtube_url(song_title)
         
         return ""
@@ -402,9 +413,11 @@ class TableRowExtractionStrategy(ExtractionStrategy):
             if url:
                 return url
         
-        # Method 3: Fallback to search
-        if config.fallback_to_search:
-            return self._search_youtube_url(song_title)
+        # Method 3: Fallback to search only if not UI/status text
+        if config.fallback_to_search and not self.song_matcher.is_ui_text(song_title):
+            # Try active search and pick first result; if that fails, return plain search URL
+            url = self._search_and_pick_first_youtube(driver, song_title)
+            return url or self._search_youtube_url(song_title)
         
         return ""
     
@@ -429,9 +442,10 @@ class TableRowExtractionStrategy(ExtractionStrategy):
             if url:
                 return url
         
-        # Fallback to search
-        if config.fallback_to_search:
-            return self._search_youtube_url(song_title)
+        # Fallback to search only if the title doesn't look like UI text
+        if config.fallback_to_search and not self.song_matcher.is_ui_text(song_title):
+            url = self._search_and_pick_first_youtube(driver, song_title)
+            return url or self._search_youtube_url(song_title)
         
         return ""
     
@@ -444,35 +458,64 @@ class TableRowExtractionStrategy(ExtractionStrategy):
         """Extract URL by clicking the button and capturing opened tab."""
         try:
             original_windows = driver.window_handles
-            
+
+            # Install window.open hook to capture target URL
+            try:
+                driver.execute_script(
+                    """
+                    if (!window.__openHookInstalled) {
+                        (function(){
+                            var _orig = window.open;
+                            window.__lastOpenedURL = null;
+                            window.open = function(u){
+                                try { window.__lastOpenedURL = (typeof u==='string' ? u : (u && u.url) || null); } catch(e) {}
+                                return _orig.apply(window, arguments);
+                            };
+                            window.__openHookInstalled = true;
+                        })();
+                    }
+                    """
+                )
+            except:
+                pass
+
             # Click the button to open YouTube
             driver.execute_script("arguments[0].click();", button_element)
-            
-            # Wait for new window
-            time.sleep(2)
-            
+
+            # Short wait
+            time.sleep(1.5)
+
+            # Check hook-captured URL first
+            try:
+                captured = driver.execute_script("return window.__lastOpenedURL || null;")
+                if captured and ("youtube.com" in captured or "youtu.be" in captured):
+                    return captured
+            except:
+                pass
+
+            # Fallback: detect a newly opened tab
             new_windows = driver.window_handles
             if len(new_windows) > len(original_windows):
                 new_window = [w for w in new_windows if w not in original_windows][0]
                 driver.switch_to.window(new_window)
-                
+
                 # Minimal wait and audio control
                 time.sleep(0.5)
-                
+
                 if config.mute_audio or config.pause_videos:
                     self._control_video_playback(driver, config)
-                
+
                 current_url = driver.current_url
-                
+
                 # Close new tab and return to original
                 if config.close_new_tabs:
                     driver.close()
                     driver.switch_to.window(original_windows[0])
-                
+
                 if "youtube.com" in current_url or "youtu.be" in current_url:
                     self.logger.info(f"Found YouTube URL via button click: {current_url}")
                     return current_url
-                    
+
         except Exception as e:
             self.logger.debug(f"Button click extraction failed: {e}")
             # Make sure we're back to original window
@@ -480,7 +523,7 @@ class TableRowExtractionStrategy(ExtractionStrategy):
                 driver.switch_to.window(driver.window_handles[0])
             except:
                 pass
-        
+
         return ""
     
     def _extract_via_javascript(
@@ -515,11 +558,11 @@ class TableRowExtractionStrategy(ExtractionStrategy):
             # Check each possible URL source
             for key, value in result.items():
                 if value and ("youtube.com" in str(value) or "youtu.be" in str(value)):
-                    # Extract URL from the value
-                    url_pattern = r'https?://(?:www\.)?(youtube\.com|youtu\.be)/[^\s"\'>\)]+'
+                    # Extract full URLs (bug fix: capture the whole match, not just domain)
+                    url_pattern = r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s"\'>\)]+)'
                     urls = re.findall(url_pattern, str(value))
                     if urls:
-                        found_url = f"https://{urls[0]}"
+                        found_url = urls[0]
                         self.logger.debug(f"Found YouTube URL via {key}: {found_url}")
                         return found_url
                         
@@ -616,3 +659,43 @@ class TableRowExtractionStrategy(ExtractionStrategy):
         except Exception as e:
             self.logger.debug(f"Error generating YouTube search URL: {e}")
             return ""
+    
+    def _search_and_pick_first_youtube(self, driver: "WebDriver", song_title: str) -> str:
+        """Open YouTube search in a temp tab and return the first video result URL."""
+        try:
+            search_url = self._search_youtube_url(song_title)
+            if not search_url:
+                return ""
+            original_window = driver.current_window_handle
+            original_windows = driver.window_handles
+            # Open new tab
+            driver.execute_script("window.open(arguments[0], '_blank');", search_url)
+            time.sleep(1.5)
+            # Switch to new tab
+            new_windows = driver.window_handles
+            target = [w for w in new_windows if w not in original_windows]
+            if not target:
+                return ""
+            driver.switch_to.window(target[0])
+            # Try to find the first video title link (with wait)
+            try:
+                from selenium.webdriver.common.by import By as _By
+                from selenium.webdriver.support.ui import WebDriverWait as _Wait
+                from selenium.webdriver.support import expected_conditions as _EC
+                try:
+                    _Wait(driver, 10).until(_EC.presence_of_element_located((_By.CSS_SELECTOR, "a#video-title, a[href*='watch'], a[href*='shorts'], a[href*='music.youtube.com/watch']")))
+                except Exception:
+                    pass
+                # Accept standard watch links, shorts, and music links
+                candidates = driver.find_elements(_By.CSS_SELECTOR, "a#video-title, a[href*='watch'], a[href*='shorts'], a[href*='music.youtube.com/watch']")
+                for el in candidates:
+                    href = el.get_attribute("href")
+                    if href and ("youtube.com/watch" in href or "youtu.be/" in href or "youtube.com/shorts" in href or "music.youtube.com/watch" in href):
+                        return href
+            finally:
+                # Close and return to original window
+                driver.close()
+                driver.switch_to.window(original_window)
+        except Exception as e:
+            self.logger.debug(f"YouTube search parse failed: {e}")
+        return ""
